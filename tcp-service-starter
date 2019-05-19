@@ -1,0 +1,39 @@
+#!/bin/bash -e
+
+# ensure that env variable __IPM_ID is present
+if [ "$__IPM_ID" == "" ];
+then
+	echo "env variable __IPM_ID is missing!"
+	exit 1
+fi
+
+# run service in background
+(
+	env --unset=__IPM_ID $* &
+	SERVICE_PID="$!"
+	trap "kill $SERVICE_PID" EXIT
+	wait $SERVICE_PID
+) </dev/null >/dev/null 2>/dev/null &
+SHELL_PID="$!"
+
+# wait for port binding
+while true;
+do
+	SERVICE_PIDS="$(pstree -Ap $SHELL_PID | sed 's/[^(]*(\([0-9]*\))/\1\n/g' | grep -v ^$)"
+	if [ "$SERVICE_PIDS" == "" ];
+	then
+		exit 1
+	fi
+
+	ALL_PIDS_WITH_OPEN_PORTS="$(netstat -tlnp 2>/dev/null | grep "[0-9]/" | sed 's#^.* \([0-9]*\)/.*$#\1#g')"
+	SERVICE_PIDS_WITH_OPEN_PORTS="$(join <(echo "$SERVICE_PIDS" | sort) <(echo "$ALL_PIDS_WITH_OPEN_PORTS" | sort))"
+	if [ "$SERVICE_PIDS_WITH_OPEN_PORTS" != "" ];
+	then
+		break
+	fi
+
+	sleep 0.1
+done
+
+# exit starter and preserve service in background
+disown

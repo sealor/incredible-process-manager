@@ -1,0 +1,240 @@
+#!/bin/bash -e
+
+# TODO: migrate everything to "running_config" (with PID)
+# TODO: replace filter_*_config_by_name() by generic filter_by_name()
+# TODO: replace filter_*_config_by_group() by generic filter_by_group()
+# TODO: respect dependencies when starting/stopping processes (man tsort)
+# TODO: add -r command (restart)
+# TODO: add -m command (migrate/synchronize running processes with configuration)
+
+export LC_ALL=C
+CONFIG_NAME="task.conf"
+
+usage() {
+	cat <<-EOF
+		usage: $0 (-s|-e|-d|--self-test|-h) [process-names|group-names]
+
+		The Incredible Process Manager starts and stops Unix processes.
+		It is designed to manage Unix services which depend on each other.
+		The configuration is read from task.conf.
+
+		commands:
+		-s	start process or group of processes
+		-e	stop process or group of processes
+		-d	display running processes with their start configuration
+		-h	show this help
+
+		config file example:
+		# Group  Name      Dependencies  Start command
+		GroupA   SERVER    -             ./tcp-service-starter  nc -lvp 0
+		GroupA   ProcessA  SERVER        ./process-starter      sleep 1234
+		GroupB   ProcessB  SERVER        ./process-starter      sleep 1227
+
+		start command requirements:
+		- must stop after service is fully started and available
+		- holds exactly one process in background with env variable __IPM_ID
+		- this process is used for process termination
+	EOF
+	exit 1
+}
+
+
+main() {
+	COMMAND="$1"
+	shift
+
+	case "$COMMAND" in
+		-s)		start $*;;
+		-e)		stop $*;;
+		-d)		display;;
+		--self-test)	self_test;;
+		*)		usage;;
+	esac
+}
+
+start() {
+	TASK_CONFIG="$(resolve_task_config)"
+	CONFIGS_BY_GROUP="$(echo "$TASK_CONFIG" | filter_task_config_by_group $*)"
+	CONFIGS_BY_NAME="$(echo "$TASK_CONFIG" | filter_task_config_by_name $*)"
+
+	START_CONFIGS="$(echo "$CONFIGS_BY_GROUP""$CONFIGS_BY_NAME" | sort -u)"
+
+	if [ "$START_CONFIGS" == "" ];
+	then
+		echo "No matching processes found!"
+		exit 1
+	fi
+
+	while read CONFIG_LINE;
+	do
+		START_COMMAND="$(echo "$CONFIG_LINE" | sed 's/^\s*\S*\s*\S*\s*\S*\s*\S*\s*//')"
+		START_NAME="$(echo "$CONFIG_LINE" | awk '{print $3}')"
+		START_CONFIG="$(echo "$CONFIG_LINE" | cut -d ' ' -f2-)"
+		(__IPM_ID="$START_CONFIG" $START_COMMAND)
+		echo "STARTED: $START_NAME"
+	done <<< "$START_CONFIGS"
+}
+
+stop() {
+	RUNNING_CONFIG="$(resolve_running_config)"
+	CONFIGS_BY_GROUP="$(echo "$RUNNING_CONFIG" | filter_running_config_by_group $*)"
+	CONFIGS_BY_NAME="$(echo "$RUNNING_CONFIG" | filter_running_config_by_name $*)"
+
+	STOP_CONFIGS="$(echo "$CONFIGS_BY_GROUP""$CONFIGS_BY_NAME" | sort -u)"
+
+	if [ "$STOP_CONFIGS" == "" ];
+	then
+		echo "No matching processes found!"
+		exit 1
+	fi
+
+	while read CONFIG_LINE;
+	do
+		STOP_PID="$(echo "$CONFIG_LINE" | awk '{print $1}')"
+		STOP_NAME="$(echo "$CONFIG_LINE" | awk '{print $3}')"
+		kill $STOP_PID
+		wait_for_pid $STOP_PID
+		echo "STOPPED: $STOP_NAME"
+	done <<< "$STOP_CONFIGS"
+}
+
+display() {
+	resolve_running_config
+}
+
+
+resolve_task_config() {
+	grep -v "^\s*#" $CONFIG_NAME | sed 's/^\s*\(\S*\)\s*\(\S*\)\s*\(\S*\)\s*\(.*\)$/- \1 \2 \3 \4/'
+}
+
+filter_task_config_by_group() {
+	SELECTED_GROUPS="$(echo "$*" | tr -s ' ' '\n')"
+	CONFIG_BY_GROUP="$(cat | awk '{print $2,$0}')"
+	join <(echo "$SELECTED_GROUPS" | sort) <(echo "$CONFIG_BY_GROUP" | sort -k1,1) | cut -d ' ' -f2-
+}
+
+filter_task_config_by_name() {
+	SELECTED_NAMES="$(echo "$*" | tr -s ' ' '\n')"
+	CONFIG_BY_NAME="$(cat | awk '{print $3,$0}')"
+	join <(echo "$SELECTED_NAMES" | sort) <(echo "$CONFIG_BY_NAME" | sort -k1,1) | cut -d ' ' -f2-
+}
+
+resolve_running_config() {
+	grep -z "^__IPM_ID=" /proc/*/environ 2>/dev/null | tr '\0' '\n' | sed 's#^/proc/\([0-9]*\)/environ:__IPM_ID=\(.*\)$#\1 \2#'
+}
+
+filter_running_config_by_group() {
+	SELECTED_GROUPS="$(echo "$*" | tr -s ' ' '\n')"
+	CONFIG_BY_GROUP="$(cat | awk '{print $2,$0}')"
+	join <(echo "$SELECTED_GROUPS" | sort) <(echo "$CONFIG_BY_GROUP" | sort -k1,1) | cut -d ' ' -f2-
+}
+
+filter_running_config_by_name() {
+	SELECTED_NAMES="$(echo "$*" | tr -s ' ' '\n')"
+	CONFIG_BY_NAME="$(cat | awk '{print $3,$0}')"
+	join <(echo "$SELECTED_NAMES" | sort) <(echo "$CONFIG_BY_NAME" | sort -k1,1) | cut -d ' ' -f2-
+}
+
+wait_for_pid() {
+	tail --pid=$1 -f /dev/null
+}
+
+setup_test() {
+	ORIGIN_DIR="$PWD"
+	TEMP_DIR="$(mktemp --directory --suffix ipm)"
+	cd "$TEMP_DIR"
+	cp "$ORIGIN_DIR"/{ipm,tcp-service-starter,process-starter} .
+}
+
+teardown_test() {
+	cd "$ORIGIN_DIR"
+	rm -rf "$TEMP_DIR"
+}
+
+assert() {
+	test "$@" >/dev/null 2>/dev/null
+	RC=$?
+
+	if [ $RC -ne 0 ];
+	then
+		echo "$TEST_FUNCTION FAILED at line ${BASH_LINENO[0]} with: $@" >&2
+		exit 1
+	fi
+}
+
+self_test() {
+	if [ "$(resolve_running_config)" != "" ];
+	then
+		echo "The self test can only be started if IPM is not currently used on this system!"
+		exit 1
+	fi
+
+	TEST_FUNCTIONS="$(declare -F | awk '{print $3}' | grep ^test_)"
+
+	if [ "$TEST_FUNCTIONS" == "" ];
+	then
+		echo "No test functions found!"
+		exit 1
+	fi
+
+	while read TEST_FUNCTION;
+	do
+		setup_test
+		if ($TEST_FUNCTION);
+		then
+			echo "SUCCESS: $TEST_FUNCTION"
+		fi
+		teardown_test
+	done <<< "$TEST_FUNCTIONS"
+}
+
+
+### function tests ###
+
+test_resolve_task_config() {
+	cat > task.conf <<-EOF
+	# comment1
+	     # comment2
+	  GROUP1   PROCESS1 DEPS ./starter echo "    "
+	GROUP2 PROCESS2 - ./starter echo sleep 1
+	EOF
+
+	EXPECTED=$(cat <<-EOF
+	- GROUP1 PROCESS1 DEPS ./starter echo "    "
+	- GROUP2 PROCESS2 - ./starter echo sleep 1
+	EOF
+	)
+
+	assert "$(resolve_task_config)" == "$EXPECTED"
+}
+
+
+### integration tests ###
+
+test_start_and_stop_simple_process() {
+	cat > task.conf <<-EOF
+	GROUP1 PROCESS1 - ./process-starter sleep 1
+	EOF
+
+	assert "$(./ipm -d | wc -l)" -eq 0
+	./ipm -s PROCESS1 >/dev/null
+	assert "$(./ipm -d | wc -l)" -eq 1
+	./ipm -e PROCESS1 >/dev/null
+	assert "$(./ipm -d | wc -l)" -eq 0
+}
+
+test_start_and_stop_simple_process_group() {
+	cat > task.conf <<-EOF
+	GROUP2 PROCESS2 - ./process-starter sleep 2
+	GROUP2 PROCESS3 - ./process-starter sleep 3
+	EOF
+
+	assert "$(./ipm -d | wc -l)" -eq 0
+	./ipm -s GROUP2 >/dev/null
+	assert "$(./ipm -d | wc -l)" -eq 2
+	./ipm -e GROUP2 >/dev/null
+	assert "$(./ipm -d | wc -l)" -eq 0
+}
+
+
+main $*

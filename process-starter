@@ -1,0 +1,19 @@
+#!/bin/bash -e
+
+# ensure that env variable __IPM_ID is present
+if [ "$__IPM_ID" == "" ];
+then
+	echo "env variable __IPM_ID is missing!"
+	exit 1
+fi
+
+# run service in background
+(
+	env --unset=__IPM_ID $* &
+	SERVICE_PID="$!"
+	trap "kill $SERVICE_PID" EXIT # send KM ENDE telegram
+	wait $SERVICE_PID
+) </dev/null >/dev/null 2>/dev/null &
+
+# exit starter and preserve service in background
+disown
