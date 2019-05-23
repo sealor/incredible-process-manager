@@ -124,29 +124,6 @@ wait_for_pid() {
 	tail --pid=$1 -f /dev/null
 }
 
-setup_test() {
-	ORIGIN_DIR="$PWD"
-	TEMP_DIR="$(mktemp --directory --suffix ipm)"
-	cd "$TEMP_DIR"
-	cp "$ORIGIN_DIR"/{ipm,tcp-service-starter,process-starter} .
-}
-
-teardown_test() {
-	cd "$ORIGIN_DIR"
-	rm -rf "$TEMP_DIR"
-}
-
-assert() {
-	test "$@" >/dev/null 2>/dev/null
-	RC=$?
-
-	if [ $RC -ne 0 ];
-	then
-		echo "$TEST_FUNCTION FAILED at line ${BASH_LINENO[0]} with: $@" >&2
-		exit 1
-	fi
-}
-
 self_test() {
 	if [ "$(resolve_running_config)" != "" ];
 	then
@@ -171,6 +148,29 @@ self_test() {
 		fi
 		teardown_test
 	done <<< "$TEST_FUNCTIONS"
+}
+
+setup_test() {
+	ORIGIN_DIR="$PWD"
+	TEMP_DIR="$(mktemp --directory --suffix ipm)"
+	cd "$TEMP_DIR"
+	cp "$ORIGIN_DIR"/{ipm,tcp-service-starter,process-starter} .
+}
+
+teardown_test() {
+	cd "$ORIGIN_DIR"
+	rm -rf "$TEMP_DIR"
+}
+
+assert() {
+	test "$@" >/dev/null 2>/dev/null
+	RC=$?
+
+	if [ $RC -ne 0 ];
+	then
+		echo "$TEST_FUNCTION FAILED at line ${BASH_LINENO[0]} with: $@" >&2
+		exit 1
+	fi
 }
 
 
