@@ -9,7 +9,7 @@ CONFIG_NAME="task.conf"
 
 usage() {
 	cat <<-EOF
-		usage: $0 (-s|-e|-d|--self-test|-h) [process-names|group-names]
+		usage: $0 (-s|-e|-d|--status|--self-test|-h) [process-names|group-names]
 
 		The Incredible Process Manager starts and stops Unix processes.
 		It is designed to manage Unix services which depend on each other.
@@ -44,6 +44,7 @@ main() {
 		-s)		start $*;;
 		-e)		stop $*;;
 		-d)		display;;
+		--status)	status;;
 		--self-test)	self_test;;
 		*)		usage;;
 	esac
@@ -122,6 +123,59 @@ filter_by_group() {
 
 wait_for_pid() {
 	tail --pid=$1 -f /dev/null
+}
+
+status() {
+	TASK_CONFIG="$(resolve_task_config)"
+	RUN_CONFIG="$(resolve_running_config)"
+
+	TASK_NAMES="$(echo "$TASK_CONFIG" | awk '{print $3}')"
+	RUN_NAMES="$(echo "$RUN_CONFIG" | awk '{print $3}')"
+
+	STOPPED_NAMES="$(echo "$TASK_NAMES" | grep -vFxf <(echo "$RUN_NAMES") || true)"
+	REMOVED_NAMES="$(echo "$RUN_NAMES" | grep -vFxf <(echo "$TASK_NAMES") || true)"
+	STARTED_OR_CHANGED_NAMES="$(echo "$RUN_NAMES" | grep -vFxf <(echo "$REMOVED_NAMES") || true)"
+
+	TASK_CONFIG_WITHOUT_PID="$(echo "$TASK_CONFIG" | filter_by_name $STARTED_OR_CHANGED_NAMES | cut -d ' ' -f2-)"
+	RUN_CONFIG_WITHOUT_PID="$(echo "$RUN_CONFIG" | filter_by_name $STARTED_OR_CHANGED_NAMES | cut -d ' ' -f2-)"
+
+	STARTED_NAMES="$(echo "$RUN_CONFIG_WITHOUT_PID" | grep -Fxf <(echo "$TASK_CONFIG_WITHOUT_PID") | awk '{print $2}')"
+	CHANGED_NAMES="$(echo "$RUN_CONFIG_WITHOUT_PID" | grep -vFxf <(echo "$TASK_CONFIG_WITHOUT_PID") | awk '{print $2}')"
+
+	NAME_PID="$(echo "$RUN_CONFIG" | awk '{print $3,$1}' | sort -k1,1)"
+
+	while read CONFIG_LINE;
+	do
+		NAME="$(echo "$CONFIG_LINE" | awk '{print $2}')"
+
+		if echo "$NAME" | grep -Fxf <(echo "$STARTED_NAMES") >/dev/null;
+		then
+			PID="$(join <(echo "$NAME_PID") <(echo "$NAME") | awk '{print $2}')"
+			echo "STARTED $PID $CONFIG_LINE"
+			continue
+		fi
+
+		if echo "$NAME" | grep -Fxf <(echo "$CHANGED_NAMES") >/dev/null;
+		then
+			PID="$(join <(echo "$NAME_PID") <(echo "$NAME") | awk '{print $2}')"
+			echo "CHANGED $PID $CONFIG_LINE"
+			continue
+		fi
+
+		if echo "$NAME" | grep -Fxf <(echo "$STOPPED_NAMES") >/dev/null;
+		then
+			echo "STOPPED - $CONFIG_LINE"
+			continue
+		fi
+	done <<< "$(echo "$TASK_CONFIG" | cut -d ' ' -f2-)"
+
+	if [ "$REMOVED_NAMES" != "" ];
+	then
+		while read RUN_LINE;
+		do
+			echo "REMOVED $RUN_LINE"
+		done <<< "$(echo "$RUN_CONFIG" | filter_by_name $REMOVED_NAMES)"
+	fi
 }
 
 self_test() {
@@ -253,6 +307,34 @@ test_start_and_stop_simple_process_group() {
 	assert "$(./ipm -d | wc -l)" -eq 2
 	./ipm -e GROUP2 >/dev/null
 	assert "$(./ipm -d | wc -l)" -eq 0
+}
+
+test_status() {
+	cat > task.conf <<-EOF
+	GROUP PROCESS1 - ./process-starter sleep 2
+	GROUP PROCESS2 - ./process-starter sleep 3
+	GROUP PROCESS3 - ./process-starter sleep 4
+	GROUP PROCESS4 - ./process-starter sleep 5
+	EOF
+
+	#assert "$(./ipm --status | wc -l)" -eq 4
+
+	./ipm -s PROCESS1 >/dev/null
+	assert "$(./ipm --status | grep PROCESS1 | sed 's/ [0-9]\+ / 123 /')" == "STARTED 123 GROUP PROCESS1 - ./process-starter sleep 2"
+
+	./ipm -s PROCESS2 PROCESS4 >/dev/null
+	cat > task.conf <<-EOF
+	GROUP PROCESS1 - ./process-starter sleep 2
+	NEW   PROCESS2 - ./process-starter sleep 3
+	GROUP PROCESS3 - ./process-starter sleep 4
+	EOF
+
+	assert "$(./ipm --status | wc -l)" -eq 4
+
+	assert "$(./ipm --status | grep PROCESS1 | sed 's/ [0-9]\+ / 123 /')" == "STARTED 123 GROUP PROCESS1 - ./process-starter sleep 2"
+	assert "$(./ipm --status | grep PROCESS2 | sed 's/ [0-9]\+ / 123 /')" == "CHANGED 123 NEW PROCESS2 - ./process-starter sleep 3"
+	assert "$(./ipm --status | grep PROCESS3)" == "STOPPED - GROUP PROCESS3 - ./process-starter sleep 4"
+	assert "$(./ipm --status | grep PROCESS4 | sed 's/ [0-9]\+ / 123 /')" == "REMOVED 123 GROUP PROCESS4 - ./process-starter sleep 5"
 }
 
 
