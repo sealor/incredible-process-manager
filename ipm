@@ -1,8 +1,5 @@
 #!/bin/bash -e
 
-# TODO: migrate everything to "running_config" (with PID)
-# TODO: replace filter_*_config_by_name() by generic filter_by_name()
-# TODO: replace filter_*_config_by_group() by generic filter_by_group()
 # TODO: respect dependencies when starting/stopping processes (man tsort)
 # TODO: add -r command (restart)
 # TODO: add -m command (migrate/synchronize running processes with configuration)
@@ -54,8 +51,8 @@ main() {
 
 start() {
 	TASK_CONFIG="$(resolve_task_config)"
-	CONFIGS_BY_GROUP="$(echo "$TASK_CONFIG" | filter_task_config_by_group $*)"
-	CONFIGS_BY_NAME="$(echo "$TASK_CONFIG" | filter_task_config_by_name $*)"
+	CONFIGS_BY_GROUP="$(echo "$TASK_CONFIG" | filter_by_group $*)"
+	CONFIGS_BY_NAME="$(echo "$TASK_CONFIG" | filter_by_name $*)"
 
 	START_CONFIGS="$(echo "$CONFIGS_BY_GROUP""$CONFIGS_BY_NAME" | sort -u)"
 
@@ -77,8 +74,8 @@ start() {
 
 stop() {
 	RUNNING_CONFIG="$(resolve_running_config)"
-	CONFIGS_BY_GROUP="$(echo "$RUNNING_CONFIG" | filter_running_config_by_group $*)"
-	CONFIGS_BY_NAME="$(echo "$RUNNING_CONFIG" | filter_running_config_by_name $*)"
+	CONFIGS_BY_GROUP="$(echo "$RUNNING_CONFIG" | filter_by_group $*)"
+	CONFIGS_BY_NAME="$(echo "$RUNNING_CONFIG" | filter_by_name $*)"
 
 	STOP_CONFIGS="$(echo "$CONFIGS_BY_GROUP""$CONFIGS_BY_NAME" | sort -u)"
 
@@ -107,32 +104,20 @@ resolve_task_config() {
 	grep -v "^\s*#" $CONFIG_NAME | sed 's/^\s*\(\S*\)\s*\(\S*\)\s*\(\S*\)\s*\(.*\)$/- \1 \2 \3 \4/'
 }
 
-filter_task_config_by_group() {
-	SELECTED_GROUPS="$(echo "$*" | tr -s ' ' '\n')"
-	CONFIG_BY_GROUP="$(cat | awk '{print $2,$0}')"
-	join <(echo "$SELECTED_GROUPS" | sort) <(echo "$CONFIG_BY_GROUP" | sort -k1,1) | cut -d ' ' -f2-
-}
-
-filter_task_config_by_name() {
-	SELECTED_NAMES="$(echo "$*" | tr -s ' ' '\n')"
-	CONFIG_BY_NAME="$(cat | awk '{print $3,$0}')"
-	join <(echo "$SELECTED_NAMES" | sort) <(echo "$CONFIG_BY_NAME" | sort -k1,1) | cut -d ' ' -f2-
-}
-
 resolve_running_config() {
 	grep -z "^__IPM_ID=" /proc/*/environ 2>/dev/null | tr '\0' '\n' | sed 's#^/proc/\([0-9]*\)/environ:__IPM_ID=\(.*\)$#\1 \2#'
 }
 
-filter_running_config_by_group() {
-	SELECTED_GROUPS="$(echo "$*" | tr -s ' ' '\n')"
-	CONFIG_BY_GROUP="$(cat | awk '{print $2,$0}')"
-	join <(echo "$SELECTED_GROUPS" | sort) <(echo "$CONFIG_BY_GROUP" | sort -k1,1) | cut -d ' ' -f2-
+filter_by_name() {
+	NAMES="$(echo "$*" | tr -s ' ' '\n')"
+	CONFIG_BY_NAME="$(cat | awk '{print $3,$0}')"
+	join <(echo "$NAMES" | sort) <(echo "$CONFIG_BY_NAME" | sort -k1,1) | cut -d ' ' -f2-
 }
 
-filter_running_config_by_name() {
-	SELECTED_NAMES="$(echo "$*" | tr -s ' ' '\n')"
-	CONFIG_BY_NAME="$(cat | awk '{print $3,$0}')"
-	join <(echo "$SELECTED_NAMES" | sort) <(echo "$CONFIG_BY_NAME" | sort -k1,1) | cut -d ' ' -f2-
+filter_by_group() {
+	NAMES="$(echo "$*" | tr -s ' ' '\n')"
+	CONFIG_BY_NAME="$(cat | awk '{print $2,$0}')"
+	join <(echo "$NAMES" | sort) <(echo "$CONFIG_BY_NAME" | sort -k1,1) | cut -d ' ' -f2-
 }
 
 wait_for_pid() {
@@ -206,6 +191,40 @@ test_resolve_task_config() {
 	)
 
 	assert "$(resolve_task_config)" == "$EXPECTED"
+}
+
+test_filter_by_name() {
+	INPUT=$(cat <<-EOF
+	- GROUP1 PROCESS1 DEPS ./starter process1
+	- GROUP1 PROCESS2 DEPS ./starter process2
+	- GROUP2 PROCESS3 - ./starter process3
+	EOF
+	)
+
+	EXPECTED=$(cat <<-EOF
+	- GROUP1 PROCESS1 DEPS ./starter process1
+	- GROUP1 PROCESS2 DEPS ./starter process2
+	EOF
+	)
+
+	assert "$(echo "$INPUT" | filter_by_name PROCESS1 PROCESS2)" == "$EXPECTED"
+}
+
+test_filter_by_group() {
+	INPUT=$(cat <<-EOF
+	- GROUP1 PROCESS1 DEPS ./starter process1
+	- GROUP2 PROCESS2 DEPS ./starter process2
+	- GROUP3 PROCESS3 - ./starter process3
+	EOF
+	)
+
+	EXPECTED=$(cat <<-EOF
+	- GROUP1 PROCESS1 DEPS ./starter process1
+	- GROUP2 PROCESS2 DEPS ./starter process2
+	EOF
+	)
+
+	assert "$(echo "$INPUT" | filter_by_group GROUP1 GROUP2)" == "$EXPECTED"
 }
 
 
