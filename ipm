@@ -166,7 +166,8 @@ status() {
 		if echo "$NAME" | grep -Fxf <(echo "$CHANGED_NAMES") >/dev/null;
 		then
 			PID="$(join <(echo "$NAME_PID") <(echo "$NAME") | awk '{print $2}')"
-			echo "CHANGED $PID $CONFIG_LINE"
+			START_CONFIG="$(echo "$RUN_CONFIG" | filter_by_name "$NAME" | cut -d ' ' -f2-)"
+			echo "CHANGED $PID $START_CONFIG"
 			continue
 		fi
 
@@ -356,7 +357,7 @@ test_status() {
 	assert "$(./ipm --status | wc -l)" -eq 4
 
 	assert "$(./ipm --status | grep PROCESS1 | sed 's/ [0-9]\+ / 123 /')" == "STARTED 123 GROUP PROCESS1 - ./process-starter sleep 2"
-	assert "$(./ipm --status | grep PROCESS2 | sed 's/ [0-9]\+ / 123 /')" == "CHANGED 123 NEW PROCESS2 - ./process-starter sleep 3"
+	assert "$(./ipm --status | grep PROCESS2 | sed 's/ [0-9]\+ / 123 /')" == "CHANGED 123 GROUP PROCESS2 - ./process-starter sleep 3"
 	assert "$(./ipm --status | grep PROCESS3)" == "STOPPED - GROUP PROCESS3 - ./process-starter sleep 4"
 	assert "$(./ipm --status | grep PROCESS4 | sed 's/ [0-9]\+ / 123 /')" == "REMOVED 123 GROUP PROCESS4 - ./process-starter sleep 5"
 }
