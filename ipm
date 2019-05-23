@@ -57,6 +57,8 @@ start() {
 
 	START_CONFIGS="$(echo "$CONFIGS_BY_GROUP""$CONFIGS_BY_NAME" | sort -u)"
 
+	RUN_NAMES="$(resolve_running_config | awk '{print $3}')"
+
 	if [ "$START_CONFIGS" == "" ];
 	then
 		echo "No matching processes found!"
@@ -65,18 +67,24 @@ start() {
 
 	while read CONFIG_LINE;
 	do
-		START_COMMAND="$(echo "$CONFIG_LINE" | sed 's/^\s*\S*\s*\S*\s*\S*\s*\S*\s*//')"
 		START_NAME="$(echo "$CONFIG_LINE" | awk '{print $3}')"
-		START_CONFIG="$(echo "$CONFIG_LINE" | cut -d ' ' -f2-)"
-		(__IPM_ID="$START_CONFIG" $START_COMMAND)
-		echo "STARTED: $START_NAME"
+
+		if echo "$START_NAME" | grep -vFxf <(echo "$RUN_NAMES") >/dev/null;
+		then
+			START_COMMAND="$(echo "$CONFIG_LINE" | sed 's/^\s*\S*\s*\S*\s*\S*\s*\S*\s*//')"
+			START_CONFIG="$(echo "$CONFIG_LINE" | cut -d ' ' -f2-)"
+			(__IPM_ID="$START_CONFIG" $START_COMMAND)
+			echo "STARTED: $START_NAME"
+		else
+			echo "ALREADY STARTED: $START_NAME"
+		fi
 	done <<< "$START_CONFIGS"
 }
 
 stop() {
-	RUNNING_CONFIG="$(resolve_running_config)"
-	CONFIGS_BY_GROUP="$(echo "$RUNNING_CONFIG" | filter_by_group $*)"
-	CONFIGS_BY_NAME="$(echo "$RUNNING_CONFIG" | filter_by_name $*)"
+	RUN_CONFIG="$(resolve_running_config)"
+	CONFIGS_BY_GROUP="$(echo "$RUN_CONFIG" | filter_by_group $*)"
+	CONFIGS_BY_NAME="$(echo "$RUN_CONFIG" | filter_by_name $*)"
 
 	STOP_CONFIGS="$(echo "$CONFIGS_BY_GROUP""$CONFIGS_BY_NAME" | sort -u)"
 
@@ -306,6 +314,22 @@ test_start_and_stop_simple_process_group() {
 	./ipm -s GROUP2 >/dev/null
 	assert "$(./ipm -d | wc -l)" -eq 2
 	./ipm -e GROUP2 >/dev/null
+	assert "$(./ipm -d | wc -l)" -eq 0
+}
+
+test_double_start_and_stop_simple_process() {
+	cat > task.conf <<-EOF
+	GROUP1 PROCESS1 - ./process-starter sleep 2
+	EOF
+
+	assert "$(./ipm -d | wc -l)" -eq 0
+	./ipm -s PROCESS1 >/dev/null
+	assert "$(./ipm -d | wc -l)" -eq 1
+	./ipm -s PROCESS1 >/dev/null
+	assert "$(./ipm -d | wc -l)" -eq 1
+	./ipm -e PROCESS1 >/dev/null
+	assert "$(./ipm -d | wc -l)" -eq 0
+	./ipm -e PROCESS1 >/dev/null
 	assert "$(./ipm -d | wc -l)" -eq 0
 }
 
