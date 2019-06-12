@@ -217,6 +217,12 @@ setup_test() {
 teardown_test() {
 	cd "$ORIGIN_DIR"
 	rm -rf "$TEMP_DIR"
+
+	while [ "$(resolve_running_config)" != "" ];
+	do
+		echo "WARNING: kill remaining processes"
+		kill $(resolve_running_config | cut -d ' ' -f1) 2>/dev/null
+	done
 }
 
 assert() {
@@ -336,8 +342,6 @@ test_status() {
 	GROUP PROCESS4 - ./process-starter sleep 5
 	EOF
 
-	#assert "$(./ipm --status | wc -l)" -eq 4
-
 	./ipm -s PROCESS1 >/dev/null
 	assert "$(./ipm -d | grep PROCESS1 | sed 's/ [0-9]\+ / 123 /')" == "STARTED 123 GROUP PROCESS1 - ./process-starter sleep 2"
 
@@ -354,6 +358,9 @@ test_status() {
 	assert "$(./ipm -d | grep PROCESS2 | sed 's/ [0-9]\+ / 123 /')" == "CHANGED 123 GROUP PROCESS2 - ./process-starter sleep 3"
 	assert "$(./ipm -d | grep PROCESS3)" == "STOPPED - GROUP PROCESS3 - ./process-starter sleep 4"
 	assert "$(./ipm -d | grep PROCESS4 | sed 's/ [0-9]\+ / 123 /')" == "REMOVED 123 GROUP PROCESS4 - ./process-starter sleep 5"
+
+	./ipm -e GROUP >/dev/null
+	assert "$(./ipm -d | grep ^STARTED | wc -l)" -eq 0
 }
 
 
