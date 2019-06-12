@@ -41,8 +41,8 @@ main() {
 	shift
 
 	case "$COMMAND" in
-		-s)		start $*;;
-		-e)		stop $*;;
+		-s)		start "$@";;
+		-e)		stop "$@";;
 		-d)		display;;
 		--self-test)	self_test;;
 		*)		usage;;
@@ -51,8 +51,8 @@ main() {
 
 start() {
 	TASK_CONFIG="$(resolve_task_config)"
-	CONFIGS_BY_GROUP="$(echo "$TASK_CONFIG" | filter_by_group $*)"
-	CONFIGS_BY_NAME="$(echo "$TASK_CONFIG" | filter_by_name $*)"
+	CONFIGS_BY_GROUP="$(echo "$TASK_CONFIG" | filter_by_group "$@")"
+	CONFIGS_BY_NAME="$(echo "$TASK_CONFIG" | filter_by_name "$@")"
 
 	START_CONFIGS="$(echo "$CONFIGS_BY_GROUP""$CONFIGS_BY_NAME" | sort -u)"
 
@@ -82,8 +82,8 @@ start() {
 
 stop() {
 	RUN_CONFIG="$(resolve_running_config)"
-	CONFIGS_BY_GROUP="$(echo "$RUN_CONFIG" | filter_by_group $*)"
-	CONFIGS_BY_NAME="$(echo "$RUN_CONFIG" | filter_by_name $*)"
+	CONFIGS_BY_GROUP="$(echo "$RUN_CONFIG" | filter_by_group "$@")"
+	CONFIGS_BY_NAME="$(echo "$RUN_CONFIG" | filter_by_name "$@")"
 
 	STOP_CONFIGS="$(echo "$CONFIGS_BY_GROUP""$CONFIGS_BY_NAME" | sort -u)"
 
@@ -112,13 +112,13 @@ resolve_running_config() {
 }
 
 filter_by_name() {
-	NAMES="$(echo "$*" | tr -s ' ' '\n')"
+	NAMES="$(echo "$@" | tr -s ' ' '\n')"
 	CONFIG_BY_NAME="$(cat | awk '{print $3,$0}')"
 	join <(echo "$NAMES" | sort) <(echo "$CONFIG_BY_NAME" | sort -k1,1) | cut -d ' ' -f2-
 }
 
 filter_by_group() {
-	NAMES="$(echo "$*" | tr -s ' ' '\n')"
+	NAMES="$(echo "$@" | tr -s ' ' '\n')"
 	CONFIG_BY_NAME="$(cat | awk '{print $2,$0}')"
 	join <(echo "$NAMES" | sort) <(echo "$CONFIG_BY_NAME" | sort -k1,1) | cut -d ' ' -f2-
 }
@@ -357,4 +357,4 @@ test_status() {
 }
 
 
-main $*
+main "$@"

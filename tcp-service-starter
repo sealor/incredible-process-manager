@@ -9,7 +9,7 @@ fi
 
 # run service in background
 (
-	env --unset=__IPM_ID $* &
+	env --unset=__IPM_ID "$@" &
 	SERVICE_PID="$!"
 	trap "kill $SERVICE_PID" EXIT
 	wait $SERVICE_PID
