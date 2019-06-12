@@ -55,6 +55,7 @@ start() {
 	CONFIGS_BY_NAME="$(echo "$TASK_CONFIG" | filter_by_name "$@")"
 
 	START_CONFIGS="$(echo "$CONFIGS_BY_GROUP""$CONFIGS_BY_NAME" | sort -u)"
+	START_DEPS="$(echo "$START_CONFIGS" | cut -d ' ' -f2,4 | tr , '\n')"
 
 	RUN_NAMES="$(resolve_running_config | awk '{print $3}')"
 
@@ -361,6 +362,23 @@ test_status() {
 
 	./ipm -e GROUP >/dev/null
 	assert "$(./ipm -d | grep ^STARTED | wc -l)" -eq 0
+}
+
+test_start_dependencies() {
+	cat > task.conf <<-EOF
+	- PROCESS1 PROCESS2,PROCESS3 ./process-starter sleep 2
+	- PROCESS2 - ./process-starter sleep 3
+	- PROCESS3 - ./process-starter sleep 4
+	EOF
+
+	EXPECTED=$(cat <<-EOF
+	STARTED: PROCESS2
+	STARTED: PROCESS3
+	STARTED: PROCESS1
+	EOF
+	)
+
+	assert "$(./ipm -s PROCESS1)" == "$EXPECTED"
 }
 
 
